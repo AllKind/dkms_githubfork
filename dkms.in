@@ -1372,10 +1372,19 @@ list_each_installed_module()
     done
 }
 
+# Check if either the module source, or the symlink to it is missing
+is_module_broken() {
+    [[ $1 && $2 ]] || return 1
+    [[ -d $dkms_tree/$1/$2 ]] || return 2
+    [[ -L $dkms_tree/$1/$2/source && ! -d $dkms_tree/$1/$2/source ]] && return
+    [[ ! -L $dkms_tree/$1/$2/source && -d $dkms_tree/$1/$2/source ]] && return
+
+}
+
 is_module_added() {
     [[ $1 && $2 ]] || return 1
     [[ -d $dkms_tree/$1/$2 ]] || return 2
-    [[ -L $dkms_tree/$1/$2/source || -d $dkms_tree/$1/$2/source ]];
+    [[ -L $dkms_tree/$1/$2/source && -d $dkms_tree/$1/$2/source ]] || return 2
 }
 
 is_module_built() {
@@ -1776,6 +1785,7 @@ module_status() {
         mv="${directory#$dkms_tree/}"
         m="${mv%/*}"
         v="${mv#*/}"
+        is_module_broken "$m" "$v" && { echo "broken $m/$v"; continue; }
         is_module_added "$m" "$v" || continue
         ret=0
         module_status_built "$m" "$v" "$3" "$4" || echo "added $m/$v"
@@ -1796,6 +1806,10 @@ do_status() {
     while read status mvka; do
         IFS=/ read m v k a <<< "$mvka"
         case $status in
+            broken)
+                echo "$m/$v: $status"
+                echo "$m/$v: Missing module source directory, or the symbolic link pointing to it" >&2
+                ;;
             added)
                 echo "$m/$v: $status"
                 ;;
@@ -2199,6 +2213,8 @@ autoinstall() {
     # Walk through our list of installed and built modules, and create
     # a list of modules and their latest version.
     while read status mvka; do
+	# If the module status is broken there is nothing that can be done
+	[[ $status = broken ]] && continue
         IFS='/' read m v k a <<< "$mvka"
         if [[ -z "${latest["$m"]}" ]]; then
             known_modules[${#known_modules[@]}]="$m"
